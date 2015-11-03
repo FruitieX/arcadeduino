@@ -1,22 +1,26 @@
-/************************************************************************************************************************************
- * ShiftPWM blocking RGB fades example, (c) Elco Jacobs, updated August 2012.
+#include "HID-Project.h"
+
+const int selectorPins = 2;
+const int sigPin = 6;
+
+/*
+ * ShiftPWM non-blocking RGB fades example, (c) Elco Jacobs, updated August 2012.
  *
- * ShiftPWM blocking RGB fades example. This example uses simple delay loops to create fades.
- * If you want to change the fading mode based on inputs (sensors, buttons, serial), use the non-blocking example as a starting point.
+ * This example for ShiftPWM shows how to control your LED's in a non-blocking way: no delay loops.
+ * This example receives a number from the serial port to set the fading mode. Instead you can also read buttons or sensors.
+ * It uses the millis() function to create fades. The block fades example might be easier to understand, so start there.
+ *
  * Please go to www.elcojacobs.com/shiftpwm for documentation, fuction reference and schematics.
  * If you want to use ShiftPWM with LED strips or high power LED's, visit the shop for boards.
- ************************************************************************************************************************************/
+ */
 
 // ShiftPWM uses timer1 by default. To use a different timer, before '#include <ShiftPWM.h>', add
 // #define SHIFTPWM_USE_TIMER2  // for Arduino Uno and earlier (Atmega328)
 // #define SHIFTPWM_USE_TIMER3  // for Arduino Micro/Leonardo (Atmega32u4)
 
-// Clock and data pins are pins from the hardware SPI, you cannot choose them yourself if you use the hardware SPI.
+// Clock and data pins are pins from the hardware SPI, you cannot choose them yourself.
 // Data pin is MOSI (Uno and earlier: 11, Leonardo: ICSP 4, Mega: 51, Teensy 2.0: 2, Teensy 2.0++: 22)
 // Clock pin is SCK (Uno and earlier: 13, Leonardo: ICSP 3, Mega: 52, Teensy 2.0: 1, Teensy 2.0++: 21)
-
-// Data pin (MOSI) is pin 16 on Arduino Micro Pro
-// Clock pin (SCK) is pin 15 on Arduino Micro Pro
 
 // You can choose the latch pin yourself.
 const int ShiftPWM_latchPin=8;
@@ -26,6 +30,7 @@ const int ShiftPWM_latchPin=8;
 // const int ShiftPWM_dataPin = 11;
 // const int ShiftPWM_clockPin = 13;
 
+int leds[8] = {0};
 
 // If your LED's turn on if the pin is low, set this to true, otherwise set it to false.
 const bool ShiftPWM_invertOutputs = false;
@@ -37,17 +42,35 @@ const bool ShiftPWM_balanceLoad = false;
 
 #include <ShiftPWM.h>   // include ShiftPWM.h after setting the pins!
 
+// Function prototypes (telling the compiler these functions exist).
+//void oneByOne(void);
+//void inOutTwoLeds(void);
+//void inOutAll(void);
+//void alternatingColors(void);
+//void hueShiftAll(void);
+//void randomColors(void);
+//void fakeVuMeter(void);
+//void rgbLedRainbow(unsigned long cycleTime, int rainbowWidth);
+//void printInstructions(void);
+
 // Here you set the number of brightness levels, the update frequency and the number of shift registers.
 // These values affect the load of ShiftPWM.
 // Choose them wisely and use the PrintInterruptLoad() function to verify your load.
-// There is a calculator on my website to estimate the load.
-
 unsigned char maxBrightness = 255;
-unsigned char pwmFrequency = 120;
-int numRegisters = 3;
-int numRGBleds = numRegisters*8/3;
+unsigned char pwmFrequency = 75;
+unsigned int numRegisters = 6;
+unsigned int numOutputs = numRegisters*8;
+unsigned int numRGBLeds = numRegisters*8/3;
+unsigned int fadingMode = 0; //start with all LED's off.
+
+unsigned long startTime = 0; // start time for the chosen fading mode
 
 void setup(){
+  /*
+  while(!Serial){
+    delay(100);
+  }
+  */
   Serial.begin(9600);
 
   // Sets the number of 8-bit registers that are used.
@@ -58,131 +81,344 @@ void setup(){
   ShiftPWM.SetPinGrouping(1); //This is the default, but I added here to demonstrate how to use the funtion
 
   ShiftPWM.Start(pwmFrequency,maxBrightness);
+  //printInstructions();
+
+  for (int i = 0; i < 4; i++) {
+    pinMode(selectorPins + i, OUTPUT);
+  }
+
+  pinMode(sigPin, INPUT_PULLUP);
+
+  // Sends a clean report to the host. This is important on any Arduino type.
+  Gamepad.begin();
 }
 
-
-
-void loop()
-{
-  // Turn all LED's off.
-  ShiftPWM.SetAll(0);
-
-  // Print information about the interrupt frequency, duration and load on your program
-  ShiftPWM.PrintInterruptLoad();
-
-  // Fade in and fade out all outputs one by one fast. Usefull for testing your hardware. Use OneByOneSlow when this is going to fast.
-  ShiftPWM.OneByOneFast();
-
-  // Fade in all outputs
-  for(int j=0;j<maxBrightness;j++){
-    ShiftPWM.SetAll(j);
-    delay(20);
-  }
-  // Fade out all outputs
-  for(int j=maxBrightness;j>=0;j--){
-    ShiftPWM.SetAll(j);
-    delay(20);
-  }
-
-
-  // Fade in and out 2 outputs at a time
-  for(int output=0;output<numRegisters*8-1;output++){
-    ShiftPWM.SetAll(0);
-    for(int brightness=0;brightness<maxBrightness;brightness++){
-      ShiftPWM.SetOne(output+1,brightness);
-      ShiftPWM.SetOne(output,maxBrightness-brightness);
-      delay(1);
+void loop() {
+  /*
+  if(Serial.available()){
+    if(Serial.peek() == 'l'){
+      // Print information about the interrupt frequency, duration and load on your program
+      ShiftPWM.PrintInterruptLoad();
     }
-  }
-
-  // Hue shift all LED's
-  for(int hue = 0; hue<360; hue++){
-    ShiftPWM.SetAllHSV(hue, 255, 255);
-    delay(50);
-  }
-
-  // Alternate LED's in 6 different colors
-  for(int shift=0;shift<6;shift++){
-    for(int led=0; led<numRGBleds; led++){
-      switch((led+shift)%6){
+    else if(Serial.peek() == 'm'){
+      // Print instructions again
+      printInstructions();
+    }
+    else{
+      fadingMode = Serial.parseInt(); // read a number from the serial port to set the mode
+      Serial.print("Mode set to ");
+      Serial.print(fadingMode);
+      Serial.print(": ");
+      startTime = millis();
+      switch(fadingMode){
       case 0:
-        ShiftPWM.SetRGB(led,255,0,0);    // red
+        Serial.println("All LED's off");
         break;
       case 1:
-        ShiftPWM.SetRGB(led,0,255,0);    // green
+        Serial.println("Fade in and out one by one");
         break;
       case 2:
-        ShiftPWM.SetRGB(led,0,0,255);    // blue
+        Serial.println("Fade in and out all LED's");
         break;
       case 3:
-        ShiftPWM.SetRGB(led,255,128,0);  // orange
+        Serial.println("Fade in and out 2 LED's in parallel");
         break;
       case 4:
-        ShiftPWM.SetRGB(led,0,255,255);  // turqoise
+        Serial.println("Alternating LED's in 6 different colors");
         break;
       case 5:
-        ShiftPWM.SetRGB(led,255,0,255);  // purple
+        Serial.println("Hue shift all LED's");
+        break;
+      case 6:
+        Serial.println("Setting random LED's to random color");
+        break;
+      case 7:
+        Serial.println("Fake a VU meter");
+        break;
+      case 8:
+        Serial.println("Display a color shifting rainbow as wide as the LED's");
+        break;
+      case 9:
+        Serial.println("Display a color shifting rainbow wider than the LED's");
+        break;
+      default:
+        Serial.println("Unknown mode!");
         break;
       }
     }
-    delay(2000);
-  }
-
-  // Update random LED to random color. Funky!
-  for(int i=0;i<1000;i++){
-    ShiftPWM.SetHSV(random(numRGBleds),random(360),255,255);
-    delay(15);
-  }
-
-
-  // Immitate a VU meter
-  int peak=0;
-  int prevPeak=0;
-
-  int currentLevel = 0;
-  for(int i=0;i<40;i++){
-    prevPeak = peak;
-    while(abs(peak-prevPeak)<5){
-      peak =  random(numRGBleds); // pick a new peak value that differs at least 5 from previous peak
-    }
-    // animate to new top
-    while(currentLevel!=peak){
-      if(currentLevel<peak){
-        currentLevel++;
-      }
-      else{
-        currentLevel--;
-      }
-      for(int led=0;led<numRGBleds;led++){
-        if(led<=currentLevel){
-          int hue = (numRGBleds-1-led)*120/numRGBleds; // From green to red
-          ShiftPWM.SetHSV(led,hue,255,255);
-        }
-        else{
-          ShiftPWM.SetRGB(led,0,0,0);
-        }
-      }
-      delay((64/numRGBleds)*(numRGBleds-currentLevel)); // go slower near the top
+    while (Serial.read() >= 0){
+      ; // flush remaining characters
     }
   }
+  switch(fadingMode){
+  case 0:
+    // Turn all LED's off.
+    ShiftPWM.SetAll(0);
+    break;
+  case 1:
+    oneByOne();
+    break;
+  case 2:
+    inOutAll();
+    break;
+  case 3:
+    inOutTwoLeds();
+    break;
+  case 4:
+    alternatingColors();
+    break;
+  case 5:
+    hueShiftAll();
+    break;
+  case 6:
+    randomColors();
+    break;
+  case 7:
+    fakeVuMeter();
+    break;
+  case 8:
+    rgbLedRainbow(3000,numRGBLeds);
+    break;
+  case 9:
+    rgbLedRainbow(10000,5*numRGBLeds);
+    break;
+  default:
+    Serial.println("Unknown Mode!");
+    delay(1000);
+    break;
+  }
+  */
 
-  //  A moving rainbow for RGB leds:
-  rgbLedRainbow(numRGBleds, 5, 3, numRegisters*8/3); // Fast, over all LED's
-  rgbLedRainbow(numRGBleds, 10, 3, numRegisters*8/3*4); //slower, wider than the number of LED's
+  Gamepad.releaseAll();
+
+  bool right = false;
+  bool up = false;
+  bool down = false;
+  bool left = false;
+
+  for (unsigned int i = 0; i < 16; i++) {
+    // choose correct pin
+    digitalWrite(selectorPins + 0, i & 0b0001 ? HIGH : LOW);
+    digitalWrite(selectorPins + 1, i & 0b0010 ? HIGH : LOW);
+    digitalWrite(selectorPins + 2, i & 0b0100 ? HIGH : LOW);
+    digitalWrite(selectorPins + 3, i & 0b1000 ? HIGH : LOW);
+
+    int pressed = !digitalRead(sigPin);
+
+    if (pressed) {
+      if (i >= 12) {
+        // directional input
+        right |= i == 12;
+        up    |= i == 13;
+        down  |= i == 14;
+        left  |= i == 15;
+      } else {
+        // buttons
+        Gamepad.press(i + 1);
+      }
+    }
+  }
+
+  if (up && right) {
+    Gamepad.dPad2(GAMEPAD_DPAD_UP_RIGHT);
+  } else if (up && left) {
+    Gamepad.dPad2(GAMEPAD_DPAD_UP_LEFT);
+  } else if (down && right) {
+    Gamepad.dPad2(GAMEPAD_DPAD_DOWN_RIGHT);
+  } else if (down && left) {
+    Gamepad.dPad2(GAMEPAD_DPAD_DOWN_LEFT);
+  } else if (up) {
+    Gamepad.dPad2(GAMEPAD_DPAD_UP);
+  } else if (down) {
+    Gamepad.dPad2(GAMEPAD_DPAD_DOWN);
+  } else if (right) {
+    Gamepad.dPad2(GAMEPAD_DPAD_RIGHT);
+  } else if (left) {
+    Gamepad.dPad2(GAMEPAD_DPAD_LEFT);
+  } else {
+    Gamepad.dPad2(GAMEPAD_DPAD_CENTERED);
+  }
+
+  Gamepad.write();
+}
+/*
+void oneByOne(void){ // Fade in and fade out all outputs one at a time
+  unsigned char brightness;
+  unsigned long fadeTime = 500;
+  unsigned long loopTime = numOutputs*fadeTime*2;
+  unsigned long time = millis()-startTime;
+  unsigned long timer = time%loopTime;
+  unsigned long currentStep = timer%(fadeTime*2);
+
+  int activeLED = timer/(fadeTime*2);
+
+  if(currentStep <= fadeTime ){
+    brightness = currentStep*maxBrightness/fadeTime; ///fading in
+  }
+  else{
+    brightness = maxBrightness-(currentStep-fadeTime)*maxBrightness/fadeTime; ///fading out;
+  }
+  ShiftPWM.SetAll(0);
+  ShiftPWM.SetOne(activeLED, brightness);
 }
 
-void rgbLedRainbow(int numRGBLeds, int delayVal, int numCycles, int rainbowWidth){
-  // Displays a rainbow spread over a few LED's (numRGBLeds), which shifts in hue.
-  // The rainbow can be wider then the real number of LED's.
+void inOutTwoLeds(void){ // Fade in and out 2 outputs at a time
+  unsigned long fadeTime = 500;
+  unsigned long loopTime = numOutputs*fadeTime;
+  unsigned long time = millis()-startTime;
+  unsigned long timer = time%loopTime;
+  unsigned long currentStep = timer%fadeTime;
+
+  int activeLED = timer/fadeTime;
+  unsigned char brightness = currentStep*maxBrightness/fadeTime;
 
   ShiftPWM.SetAll(0);
-  for(int cycle=0;cycle<numCycles;cycle++){ // loop through the hue shift a number of times (numCycles)
-    for(int colorshift=0;colorshift<360;colorshift++){ // Shift over full color range (like the hue slider in photoshop)
-      for(int led=0;led<numRGBLeds;led++){ // loop over all LED's
-        int hue = ((led)*360/(rainbowWidth-1)+colorshift)%360; // Set hue from 0 to 360 from first to last led and shift the hue
-        ShiftPWM.SetHSV(led, hue, 255, 255); // write the HSV values, with saturation and value at maximum
-      }
-      delay(delayVal); // this delay value determines the speed of hue shift
+  ShiftPWM.SetOne((activeLED+1)%numOutputs,brightness);
+  ShiftPWM.SetOne(activeLED,maxBrightness-brightness);
+}
+
+void inOutAll(void){  // Fade in all outputs
+  unsigned char brightness;
+  unsigned long fadeTime = 2000;
+  unsigned long time = millis()-startTime;
+  unsigned long currentStep = time%(fadeTime*2);
+
+  if(currentStep <= fadeTime ){
+    brightness = currentStep*maxBrightness/fadeTime; ///fading in
+  }
+  else{
+    brightness = maxBrightness-(currentStep-fadeTime)*maxBrightness/fadeTime; ///fading out;
+  }
+  ShiftPWM.SetAll(brightness);
+}
+
+void alternatingColors(void){ // Alternate LED's in 6 different colors
+  unsigned long holdTime = 2000;
+  unsigned long time = millis()-startTime;
+  unsigned long shift = (time/holdTime)%6;
+  for(unsigned int led=0; led<numRGBLeds; led++){
+    switch((led+shift)%6){
+    case 0:
+      ShiftPWM.SetRGB(led,255,0,0);    // red
+      break;
+    case 1:
+      ShiftPWM.SetRGB(led,0,255,0);    // green
+      break;
+    case 2:
+      ShiftPWM.SetRGB(led,0,0,255);    // blue
+      break;
+    case 3:
+      ShiftPWM.SetRGB(led,255,128,0);  // orange
+      break;
+    case 4:
+      ShiftPWM.SetRGB(led,0,255,255);  // turqoise
+      break;
+    case 5:
+      ShiftPWM.SetRGB(led,255,0,255);  // purple
+      break;
     }
   }
 }
+
+void hueShiftAll(void){  // Hue shift all LED's
+  unsigned long cycleTime = 10000;
+  unsigned long time = millis()-startTime;
+  unsigned long hue = (360*time/cycleTime)%360;
+  ShiftPWM.SetAllHSV(hue, 255, 255);
+}
+
+void randomColors(void){  // Update random LED to random color. Funky!
+  unsigned long updateDelay = 100;
+  static unsigned long previousUpdateTime;
+  if(millis()-previousUpdateTime > updateDelay){
+    previousUpdateTime = millis();
+    ShiftPWM.SetHSV(random(numRGBLeds),random(360),255,255);
+  }
+}
+
+void fakeVuMeter(void){ // imitate a VU meter
+  static unsigned int peak = 0;
+  static unsigned int prevPeak = 0;
+  static unsigned long currentLevel = 0;
+  static unsigned long fadeStartTime = startTime;
+
+  unsigned long fadeTime = (currentLevel*2);// go slower near the top
+
+  unsigned long time = millis()-fadeStartTime;
+  currentLevel = time%(fadeTime);
+
+  if(currentLevel==peak){
+    // get a new peak value
+    prevPeak = peak;
+    while(abs(peak-prevPeak)<5){
+      peak =  random(numRGBLeds); // pick a new peak value that differs at least 5 from previous peak
+    }
+  }
+
+  if(millis() - fadeStartTime > fadeTime){
+    fadeStartTime = millis();
+    if(currentLevel<peak){ //fading in
+      currentLevel++;
+    }
+    else{ //fading out
+      currentLevel--;
+    }
+  }
+  // animate to new top
+  for(unsigned int led=0;led<numRGBLeds;led++){
+    if(led<currentLevel){
+      int hue = (numRGBLeds-1-led)*120/numRGBLeds; // From green to red
+      ShiftPWM.SetHSV(led,hue,255,255);
+    }
+    else if(led==currentLevel){
+      int hue = (numRGBLeds-1-led)*120/numRGBLeds; // From green to red
+      int value;
+      if(currentLevel<peak){ //fading in
+        value = time*255/fadeTime;
+      }
+      else{ //fading out
+        value = 255-time*255/fadeTime;
+      }
+      ShiftPWM.SetHSV(led,hue,255,value);
+    }
+    else{
+      ShiftPWM.SetRGB(led,0,0,0);
+    }
+  }
+}
+
+void rgbLedRainbow(unsigned long cycleTime, int rainbowWidth){
+  // Displays a rainbow spread over a few LED's (numRGBLeds), which shifts in hue.
+  // The rainbow can be wider then the real number of LED's.
+  unsigned long time = millis()-startTime;
+  unsigned long colorShift = (360*time/cycleTime)%360; // this color shift is like the hue slider in Photoshop.
+
+  for(unsigned int led=0;led<numRGBLeds;led++){ // loop over all LED's
+    int hue = ((led)*360/(rainbowWidth-1)+colorShift)%360; // Set hue from 0 to 360 from first to last led and shift the hue
+    ShiftPWM.SetHSV(led, hue, 255, 255); // write the HSV values, with saturation and value at maximum
+  }
+}
+
+void printInstructions(void){
+  Serial.println("---- ShiftPWM Non-blocking fades demo ----");
+  Serial.println("");
+
+  Serial.println("Type 'l' to see the load of the ShiftPWM interrupt (the % of CPU time the AVR is busy with ShiftPWM)");
+  Serial.println("");
+  Serial.println("Type any of these numbers to set the demo to this mode:");
+  Serial.println("  0. All LED's off");
+  Serial.println("  1. Fade in and out one by one");
+  Serial.println("  2. Fade in and out all LED's");
+  Serial.println("  3. Fade in and out 2 LED's in parallel");
+  Serial.println("  4. Alternating LED's in 6 different colors");
+  Serial.println("  5. Hue shift all LED's");
+  Serial.println("  6. Setting random LED's to random color");
+  Serial.println("  7. Fake a VU meter");
+  Serial.println("  8. Display a color shifting rainbow as wide as the LED's");
+  Serial.println("  9. Display a color shifting rainbow wider than the LED's");
+  Serial.println("");
+  Serial.println("Type 'm' to see this info again");
+  Serial.println("");
+  Serial.println("----");
+}
+*/
