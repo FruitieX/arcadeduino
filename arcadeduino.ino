@@ -53,7 +53,7 @@ float led_colors[numRGBLeds][3] = {
 };
 
 void setup() {
-  //Serial.begin(9600);
+  Serial.begin(9600);
 
   // Sets the number of 8-bit registers that are used.
   ShiftPWM.SetAmountOfRegisters(numRegisters);
@@ -74,6 +74,8 @@ void setup() {
   // Sends a clean report to the host. This is important on any Arduino type.
   Gamepad.begin();
 }
+
+bool buttons[16] = {false};
 
 void loop() {
   // fade in each of the leds one step
@@ -97,6 +99,8 @@ void loop() {
 
     int pressed = !digitalRead(sigPin);
 
+    buttons[i] = pressed;
+    
     if (pressed) {
       if (i >= 12) {
         // directional input
@@ -142,6 +146,12 @@ void loop() {
     Gamepad.dPad2(GAMEPAD_DPAD_CENTERED);
   }
 
+  String buttons_s = "";
+
+  for (int i = 0; i < 16; i++) {
+    buttons_s += (buttons[i] ? "1 " : "0 ");
+  }
+  Serial.println(String(millis()) + "\t" + buttons_s);
   if (USBDevice.configured()) {
     Gamepad.write();
   }
